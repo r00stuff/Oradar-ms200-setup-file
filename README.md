@@ -1,109 +1,118 @@
-# ORADAR MS200 LiDAR setup for ROS1
+# ORADAR MS200 LiDAR — ROS2 Jazzy Setup
 
-Clone the following repository
+Driver for the Orbbec / Oradar MS200-TOF 2D lidar on **ROS2 Jazzy Jalisco** and **Ubuntu 24.04 (Noble)**.
+
+This is a fork of [lehoangan2906/Oradar-ms200-setup-file](https://github.com/lehoangan2906/Oradar-ms200-setup-file) with the following fixes applied for standard ROS2 Jazzy:
+- `CMakeLists.txt` replaced with a clean `ament_cmake` build (original had a broken `CATKIN`/`COLCON` detection that always defaulted to ROS1)
+- `ms200_scan.launch.py` updated for Jazzy API, stable `/dev/oradar` udev symlink, and standard `/scan` topic
+- `package.xml` set to the ROS2 manifest
+
+## Hardware
+
+| Detail | Value |
+|---|---|
+| Range | 0.05 – 12.0 m |
+| Scan rate | 10 Hz |
+| Angular resolution | 0.4° |
+| Interface | UART via USB-C adapter board |
+| Linux device | `ttyACM*` (VID `1a86` / PID `55d4`) |
+
+## Prerequisites
+
+- ROS2 Jazzy installed and sourced
+- colcon build tools: `sudo apt install python3-colcon-common-extensions`
+
+## Step 1 — Udev Rule
+
+Creates a stable `/dev/oradar` symlink so the device name never changes between reboots.
+
+Plug in the lidar, then confirm it appears as `ttyACM*`:
 
 ```bash
-git clone git@github.com:lehoangan2906/Oradar-ms200-setup-file.git oradar_ros
+lsusb   # look for: QinHeng Electronics USB Single Serial (1a86:55d4)
+ls /dev/ttyACM*
 ```
 
-## Install Driver
-
-in the `oradar_ros` folder we’ve just cloned, open a terminal and input the following command:
+Install the udev rule:
 
 ```bash
-$ cd sdk
-$ mkdir build
-$ cd build
-$ cmake ..
-$ make -j4
-$ sudo make install 
-```
-
-If the system does not prompt any errors, the driver is successfully installed.
-
-## Bind LiDAR port name
-
-Open the terminal under the `oradar_ros` package
-
-Run the following command:
-
-```bash
-dmesg | tail # run before plugging in the lidar
-```
-
-And afterward, plug in the LiDAR and re-run the above command.
-
-Observe for newly added device. Depends on the device name “ttyACM*” or “ttyUSB*”, we’ll need to modify the `oradar.rules` file accordingly.
-
-```
-KERNEL=="ttyUSB*",ATTRS{idVendor}=="10c4",ATTRS{idProduct}=="ea60", MODE:="0777", SYMLINK+="oradar"
-# oradar.rules file config for ttyUSB*
-```
-
-```
+sudo tee /etc/udev/rules.d/oradar.rules << 'EOF'
 KERNEL=="ttyACM*",ATTRS{idVendor}=="1a86",ATTRS{idProduct}=="55d4", MODE:="0777", SYMLINK+="oradar"
-
+EOF
+sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-After completing the above steps, copy the `oradar.rules` file and bind it to the `/etc/udev/rules.d/` file.
+Unplug and replug the lidar, then verify:
 
 ```bash
-$ sudo cp oradar.rules /etc/udev/rules.d
+ls -la /dev/oradar   # should show: oradar -> ttyACM0
 ```
 
-Then, unplug and re-plug the LiDAR and enter the follwing command into the terminal:
+## Step 2 — Build
 
 ```bash
-$ ll /dev/oradar
+# Clone this repo
+git clone https://github.com/r00stuff/Oradar-ms200-setup-file.git ~/oradar_lidar
+
+# Symlink into your colcon workspace
+ln -s ~/oradar_lidar ~/ros2_ws/src/oradar_lidar
+
+# Build
+cd ~/ros2_ws
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-select oradar_lidar
+source install/setup.bash
 ```
 
-![Screenshot 2024-05-24 at 11.26.20 AM.png](ORADAR%20MS200%20LiDAR%20setup%20for%20ROS1%204298a08c30df476980c14f9d74691ca9/Screenshot_2024-05-24_at_11.26.20_AM.png)
-
-The above content indicates that the binding is successful. The end is not necessarily 0 and changes according to the order in which the devices are inserted.
-
-## Create a new workspce and compile function packages
-
-Take creation name as `oradar_ws` as an example.
-
-Input the following command:
+## Step 3 — Run
 
 ```bash
-$ mkdir -p oradar_ws/src
-$ cd oradar_ws/src
-$ catkin_init_workspace
+source ~/ros2_ws/install/setup.bash
+ros2 launch oradar_lidar ms200_scan.launch.py
 ```
 
-Then, copy the `oradar_ros` folder to the `oradar_ws/src` directory.
+Expected output:
 
-Then, in the `oradar_ws` directory, use `catkin_make` to compile.
+```
+[ms200] get lidar type: ms200
+[ms200] get serial port: /dev/oradar, baudrate: 230400
+[ms200] lidar device connect succuss.
+[ms200] get lidar scan data
+[ms200] ROS topic: scan
+```
+
+## Step 4 — Verify
+
+In a second terminal:
 
 ```bash
-$ cd oradar_ws
-$ catkin_make
+source ~/ros2_ws/install/setup.bash
+ros2 topic hz /scan        # should show ~10 Hz
+ros2 topic echo /scan --once   # should show range data
 ```
 
-After the compilation is passed, add the path of the workspace to `~/.bashrc`.
+## Launch File Parameters
 
-```bash
-$ sudo vim ~/.bashrc
-```
+The launch file (`launch/ms200_scan.launch.py`) starts two nodes:
 
-Copy the following content to the end of `.bashrc`
+| Node | Description |
+|---|---|
+| `ms200` | Lidar driver — publishes `sensor_msgs/LaserScan` on `/scan` |
+| `base_link_to_laser_frame` | Static TF from `base_link` to `laser_frame` |
 
-```bash
-source ~/oradar_ws/devel/setup.bash --extend
-```
+**Adjust the `--z` value** in the launch file to match the actual lidar mounting height on your robot in metres (default: `0.10`).
 
-Save and exit
+Available parameters for the lidar node:
 
-```bash
-:wq
-```
-
-Reopen a terminal, enter the following open the LiDAR and display its data on RVIZ:
-
-```bash
-$ roslaunch oradar_lidar ms200_scan_view.launch
-```
-
-![Screenshot 2024-05-24 at 11.34.41 AM.png](ORADAR%20MS200%20LiDAR%20setup%20for%20ROS1%204298a08c30df476980c14f9d74691ca9/Screenshot_2024-05-24_at_11.34.41_AM.png)
+| Parameter | Default | Description |
+|---|---|---|
+| `port_name` | `/dev/oradar` | Serial port |
+| `baudrate` | `230400` | Baud rate |
+| `frame_id` | `laser_frame` | TF frame for scan messages |
+| `scan_topic` | `scan` | Published topic name |
+| `angle_min` | `0.0` | Minimum scan angle (degrees) |
+| `angle_max` | `360.0` | Maximum scan angle (degrees) |
+| `range_min` | `0.05` | Minimum range (metres) |
+| `range_max` | `20.0` | Maximum range (metres) |
+| `clockwise` | `false` | Scan direction |
+| `motor_speed` | `10` | Motor speed (Hz) |
