@@ -2,57 +2,40 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
-'''
-parameters=[
-        {'device_model': 'MS200'},
-        {'frame_id': 'laser_frame'},
-        {'scan_topic': 'MS200/scan'},
-        {'port_name': '/dev/oradar'},
-        {'baudrate': 230400},
-        {'angle_min': 0.0},
-        {'angle_max': 360.0},
-        {'range_min': 0.05},
-        {'range_max': 20.0},
-        {'clockwise': False},
-        {'motor_speed': 10}
-      ]
-'''
 
 def generate_launch_description():
-  # LiDAR publisher node
-  ordlidar_node = Node(
-      package='oradar_lidar',
-      node_executable='oradar_scan',
-      node_name='MS200',
-      output='screen',
-      parameters=[
-        {'device_model': 'MS200'},
-        {'frame_id': 'laser_frame'},
-        {'scan_topic': 'MS200/scan'},
-        {'port_name': '/dev/ttyACM0'},
-        {'baudrate': 230400},
-        {'angle_min': 0.0},
-        {'angle_max': 360.0},
-        {'range_min': 0.05},
-        {'range_max': 20.0},
-        {'clockwise': False},
-        {'motor_speed': 10}
-      ]
-  )
+    lidar_node = Node(
+        package='oradar_lidar',
+        executable='oradar_scan',
+        name='ms200',
+        output='screen',
+        parameters=[
+            {'port_name': '/dev/oradar'},
+            {'baudrate': 230400},
+            {'frame_id': 'laser_frame'},
+            {'scan_topic': 'scan'},
+            {'device_model': 'ms200'},
+            {'angle_min': 0.0},
+            {'angle_max': 360.0},
+            {'range_min': 0.05},
+            {'range_max': 20.0},
+            {'clockwise': False},
+            {'motor_speed': 10},
+        ]
+    )
 
-  # base_link to laser_frame tf node
-  base_link_to_laser_tf_node = Node(
-    package='tf2_ros',
-    node_executable='static_transform_publisher',
-    node_name='base_link_to_base_laser',
-    arguments=['0','0','0.18','0','0','0','base_link','laser_frame']
-  )
+    # Static TF: base_link → laser_frame
+    # Adjust --z to match the actual lidar mounting height on the robot in metres.
+    base_to_laser_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='base_link_to_laser_frame',
+        arguments=['--x', '0', '--y', '0', '--z', '0.10',
+                   '--roll', '0', '--pitch', '0', '--yaw', '0',
+                   '--frame-id', 'base_link', '--child-frame-id', 'laser_frame']
+    )
 
-
-  # Define LaunchDescription variable
-  ord = LaunchDescription()
-
-  ord.add_action(ordlidar_node)
-  ord.add_action(base_link_to_laser_tf_node)
-
-  return ord
+    return LaunchDescription([
+        lidar_node,
+        base_to_laser_tf,
+    ])
